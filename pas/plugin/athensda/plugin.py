@@ -6,7 +6,7 @@ from App.class_init import default__class_init__ as InitializeClass
 
 from Products.PluggableAuthService.plugins.BasePlugin import BasePlugin
 from Products.PluggableAuthService.utils import classImplements
-
+from Products.CMFCore.utils import getToolByName
 import interface
 
 ## Imported class for plugin implementation
@@ -14,7 +14,7 @@ from OFS.Folder import Folder
 from Crypto.Cipher import AES
 from Crypto.Util import randpool
 from datetime import datetime
-
+from urlparse import urlparse
 import time
 import base64
 import urllib
@@ -83,6 +83,34 @@ class AthensdaHelper(Folder, BasePlugin):
         self.title = title
         logger.info('Engine been at AthensDA PAS Plugin.')
 
+    def _get_return_url(self, request):
+        if request.get('came_from'):
+            came_from = request.get('came_from') or request.environ['HTTP_REFERER']
+        else:
+            came_from = request['BASE0']
+
+        scheme, location, path, parameters, query, fragment = urlparse(came_from)
+        template_id = path.split('/')[-1]
+        if template_id in ['login', 'login_success', 'login_password',
+                           'login_failed', 'login_form', 'logged_in', 'logout',
+                           'logged_out', 'registered', 'mail_password',
+                           'mail_password_form', 'register', 'require_login',
+                           'member_search_results', 'pwreset_finish',
+                           # We need localhost in the list, or Testing.testbrowser
+                           # tests won't be able to log in via login_form
+                           'localhost']:
+            came_from = ''
+
+        purl = getToolByName(self, 'portal_url')
+
+        if not purl.isURLInPortal(came_from):
+            came_from = ''
+
+        if not came_from:
+            came_from = purl()  # portal url - site root
+
+        return came_from
+
     security.declarePrivate('updateCredentials')
 
     def updateCredentials(self, request, response, login, new_password):
@@ -116,7 +144,7 @@ class AthensdaHelper(Folder, BasePlugin):
                     self.insert_web_auth_log(contact_number=user,
                                              permission_set=None,
                                              url_string=None,
-                                             return_url=request.environ['HTTP_REFERER'],
+                                             return_url=self._get_return_url(request),
                                              browser=request.environ['HTTP_USER_AGENT'],
                                              ip_address=request.environ['REMOTE_ADDR'],
                                              return_parameter=decrypted_string)
@@ -135,10 +163,7 @@ class AthensdaHelper(Folder, BasePlugin):
 
         permission_set = self.get_simsathens_permissions(contact_number=user).dictionaries()
 
-        if request.get('came_from'):
-            came_from = request.get('came_from')
-        else:
-            came_from = request['BASE0']
+        came_from = self._get_return_url(request)
 
         for permission in permission_set:
             if permission['permission_set']:
@@ -172,11 +197,6 @@ class AthensdaHelper(Folder, BasePlugin):
         permission_set = self.get_simsathens_permissions(contact_number=user).dictionaries()
         decoded_key = base64.b64decode(self.key+'==')
 
-        if request.get('came_from'):
-            came_from = request.get('came_from')
-        else:
-            came_from = request['BASE0']
-
         for permission in permission_set:
             if permission['permission_set']:
                 perm_set = permission['permission_set']
@@ -190,7 +210,7 @@ class AthensdaHelper(Folder, BasePlugin):
             contact_number=user,
             permission_set='rcs-cs',
             url_string=url_string,
-            return_url=request.environ['HTTP_REFERER'],
+            return_url=self._get_return_url(request),
             browser=request.environ['HTTP_USER_AGENT'],
             ip_address=request.environ['REMOTE_ADDR'],
             return_parameter=None)
